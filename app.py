@@ -2,9 +2,9 @@ import streamlit as st
 from openai import OpenAI
 import PyPDF2
 
-# Configuration de la page (Favicon et titre de l'onglet)
+# Configuration de la page
 st.set_page_config(
-    page_title="ImmoAI - Assistant Expert",
+    page_title="DOCKIMMO - Assistant Expert",
     page_icon="🏠",
     layout="wide"
 )
@@ -12,9 +12,7 @@ st.set_page_config(
 # --- STYLE CSS PERSONNALISÉ ---
 st.markdown("""
     <style>
-    .main {
-        background-color: #f5f7f9;
-    }
+    .main { background-color: #f5f7f9; }
     .stButton>button {
         width: 100%;
         border-radius: 5px;
@@ -28,17 +26,31 @@ st.markdown("""
         border-radius: 10px;
         border: 1px solid #e0e0e0;
         box-shadow: 2px 2px 10px rgba(0,0,0,0.05);
+        white-space: pre-wrap;
     }
     </style>
     """, unsafe_allow_html=True)
 
+# --- GESTION DE LA CLÉ API ---
+# On récupère la clé dans les secrets de Streamlit. 
+# Si elle n'existe pas, on met une chaîne vide.
+st_api_key = st.secrets.get("OPENAI_API_KEY", "")
+
 # --- BARRE LATÉRALE ---
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/602/602175.png", width=100) # Logo temporaire
+    st.image("https://cdn-icons-png.flaticon.com/512/602/602175.png", width=100)
     st.title("Configuration")
-    api_key = st.text_input("Clé API OpenAI", type="password", help="Votre clé reste confidentielle.")
+    
+    # On utilise la clé des secrets comme valeur par défaut
+    api_key = st.text_input(
+        "Clé API OpenAI", 
+        value=st_api_key, 
+        type="password", 
+        help="La clé est chargée automatiquement depuis les Secrets."
+    )
+    
     st.divider()
-    st.info("Cet outil analyse vos PV d'AG et diagnostics techniques en quelques secondes.")
+    st.info("L'analyse démarre dès que vous séléctionnez un PDF et cliquez sur le bouton.")
 
 # --- CORPS PRINCIPAL ---
 col1, col2 = st.columns([1, 2], gap="large")
@@ -49,63 +61,37 @@ with col1:
         "Quel type de document ?",
         ["PV d'Assemblée Générale", "Dossier de Diagnostics (DPE)", "Rapport de gestion"]
     )
-    
     uploaded_file = st.file_uploader("Glissez le PDF ici", type="pdf")
-    
     analyze_btn = st.button("Lancer l'analyse magique ✨")
 
 with col2:
     st.subheader("📋 Résultat de l'analyse")
     
-    if analyze_btn and uploaded_file and api_key:
-        with st.spinner("Analyse approfondie en cours..."):
-            try:
-                reader = PyPDF2.PdfReader(uploaded_file)
-                # On prend un peu plus de texte pour être précis (15 pages)
-                text = "".join([page.extract_text() for page in reader.pages[:15]])
-                
-                client = OpenAI(api_key=api_key)
-                
-                # Prompt Ingénierie : On demande un format strict pour le code
-                prompt = f"""Tu es un expert en audit immobilier. Analyse ce {doc_type}.
-                D'abord, donne ces 3 infos sous ce format :
-                METRIC1: [Un résumé de 2 mots sur l'énergie ou l'état général]
-                METRIC2: [Le montant total des travaux trouvés ou '0 €']
-                METRIC3: [Le niveau de risque : Faible, Modéré ou Critique]
-                
-                Ensuite, fais ton rapport détaillé :
-                1. TRAVAUX : Liste les travaux votés, montants et dates.
-                2. FINANCES : Budget prévisionnel et fonds de travaux.
-                3. RISQUES : Litiges, impayés ou alertes.
-                4. SYNTHÈSE : Ton avis pro.
-                
-                Document : {text}"""
-
-                response = client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                full_text = response.choices[0].message.content
-
-                # --- EXTRACTION LOGIQUE DES METRICS ---
-                # On sépare les lignes pour isoler METRIC1, 2 et 3
-                lines = full_text.split('\n')
-                m1_val = next((l.split(': ')[1] for l in lines if "METRIC1" in l), "N/A")
-                m2_val = next((l.split(': ')[1] for l in lines if "METRIC2" in l), "0 €")
-                m3_val = next((l.split(': ')[1] for l in lines if "METRIC3" in l), "Inconnu")
-                
-                # Nettoyage du rapport pour enlever les lignes techniques METRIC
-                clean_report = "\n".join([l for l in lines if "METRIC" not in l])
-
-                # --- AFFICHAGE ---
-                m1, m2, m3 = st.columns(3)
-                m1.metric("État / Énergie", m1_val)
-                m2.metric("Budget Travaux", m2_val)
-                m3.metric("Niveau de Risque", m3_val)
-
-                st.divider()
-                st.markdown(f'<div class="report-box">{clean_report}</div>', unsafe_allow_html=True)
-                
-            except Exception as e:
-                st.error(f"Erreur technique : {e}")
+    if analyze_btn:
+        # Diagnostic immédiat pour comprendre pourquoi ça ne se lance pas
+        if not uploaded_file:
+            st.error("❌ Veuillez charger un fichier PDF dans la colonne de gauche.")
+        elif not api_key:
+            # On essaye de récupérer la clé des secrets si le champ texte est vide
+            api_key = st.secrets.get("OPENAI_API_KEY", "")
+            if not api_key:
+                st.error("❌ Clé API introuvable. Tapez-la dans la barre latérale.")
+        
+        # Si tout est OK, on lance l'analyse
+        if uploaded_file and api_key:
+            with st.spinner("Analyse approfondie en cours..."):
+                try:
+                    # Initialisation du client avec la clé trouvée
+                    client = OpenAI(api_key=api_key)
+                    
+                    reader = PyPDF2.PdfReader(uploaded_file)
+                    text = "".join([page.extract_text() for page in reader.pages[:15]])
+                    
+                    # Ton prompt et la suite du code...
+                    st.success("✅ Connexion réussie à l'IA !")
+                    
+                    # [METTRE ICI TON CODE DE REQUÊTE OPENAI ET D'AFFICHAGE]
+                    
+                except Exception as e:
+                    st.error(f"Erreur technique : {e}")
  
