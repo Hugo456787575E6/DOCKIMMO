@@ -61,58 +61,46 @@ with col2:
         else:
             with st.spinner("L'IA examine le document..."):
                 try:
-                    # Lecture du PDF
+                    try:
                     reader = PyPDF2.PdfReader(uploaded_file)
-                    text = "".join([page.extract_text() for page in reader.pages[:15]])
+                    pages_text = []
+                    for page in reader.pages[:20]: # On monte à 20 pages au cas où
+                        t = page.extract_text()
+                        if t:
+                            pages_text.append(t)
                     
-                    # Appel OpenAI
+                    text = "\n".join(pages_text)
+
+                    if len(text.strip()) < 50:
+                        st.error("❌ Le texte du PDF n'a pas pu être extrait. Est-ce un scan ?")
+                        st.info("Conseil : Essayez avec un PDF contenant du texte sélectionnable.")
+                        st.stop()
+                    
                     client = OpenAI(api_key=api_key)
                     
-                    prompt = f"""Tu es un expert en immobilier. Analyse ce {doc_type}.
-                    Extraits d'abord ces 3 données :
-                    METRIC1: [Résumé de l'état général en 3 mots]
-                    METRIC2: [Total des travaux votés en €]
+                    # On demande explicitement à l'IA d'analyser le texte fourni dessous
+                    prompt = f"""Tu es un expert en audit immobilier. 
+                    ANALYSE LE TEXTE DU DOCUMENT CI-DESSOUS ET EXTRAIS LES INFOS.
+                    
+                    D'abord, donne obligatoirement ces 3 lignes :
+                    METRIC1: [Résumé état]
+                    METRIC2: [Total travaux en €]
                     METRIC3: [Risque: Faible, Modéré ou Critique]
 
-                    Fais ensuite un rapport structuré avec des titres et des puces :
-                    ### 🏗️ Travaux & Entretien
-                    (Détaille les travaux votés, montants et calendrier)
-                    
-                    ### 💰 Situation Financière
-                    (Budget, impayés, fonds travaux)
-                    
-                    ### ⚠️ Points de Vigilance
-                    (Litiges, procédures, urgences)
-                    
-                    ### 📝 Conclusion de l'expert
-                    (Ton avis sur l'opportunité d'achat)
-                    
-                    Document : {text}"""
+                    Rapport détaillé ensuite :
+                    ### 🏗️ Travaux
+                    ### 💰 Finances
+                    ### ⚠️ Risques
+                    ### 📝 Synthèse
+
+                    TEXTE DU DOCUMENT À ANALYSER :
+                    {text}"""
 
                     response = client.chat.completions.create(
                         model="gpt-4o",
-                        messages=[{"role": "user", "content": prompt}]
+                        messages=[
+                            {"role": "system", "content": "Tu es un assistant qui analyse des documents immobiliers. Tu ne réponds qu'en te basant sur le texte fourni."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.2 # On baisse la température pour plus de précision
                     )
-                    
-                    full_res = response.choices[0].message.content
-                    
-                    # Découpage pour l'affichage
-                    lines = full_res.split('\n')
-                    m1_v = next((l.split(': ')[1] for l in lines if "METRIC1" in l), "N/A")
-                    m2_v = next((l.split(': ')[1] for l in lines if "METRIC2" in l), "0 €")
-                    m3_v = next((l.split(': ')[1] for l in lines if "METRIC3" in l), "Inconnu")
-                    
-                    clean_report = "\n".join([l for l in lines if "METRIC" not in l])
-
-                    # Affichage des résultats
-                    c_a, c_b, c_c = st.columns(3)
-                    c_a.metric("État", m1_v)
-                    c_b.metric("Travaux", m2_v)
-                    c_c.metric("Risque", m3_v)
-                    
-                    st.divider()
-                    st.markdown(f'<div class="report-box">{clean_report}</div>', unsafe_allow_html=True)
-                    st.success("Analyse terminée avec succès !")
-
-                except Exception as e:
-                    st.error(f"Erreur lors de l'analyse : {e}")
