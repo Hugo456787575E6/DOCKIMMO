@@ -2,14 +2,14 @@ import streamlit as st
 from openai import OpenAI
 import PyPDF2
 
-# Configuration de la page
+# 1. Configuration de la page
 st.set_page_config(
-    page_title="DOCKIMMO - Assistant Expert",
+    page_title="DOCKIMMO - Expert IA",
     page_icon="🏠",
     layout="wide"
 )
 
-# --- STYLE CSS PERSONNALISÉ ---
+# 2. Style CSS
 st.markdown("""
     <style>
     .main { background-color: #f5f7f9; }
@@ -22,76 +22,97 @@ st.markdown("""
     }
     .report-box {
         background-color: white;
-        padding: 20px;
+        padding: 25px;
         border-radius: 10px;
         border: 1px solid #e0e0e0;
         box-shadow: 2px 2px 10px rgba(0,0,0,0.05);
-        white-space: pre-wrap;
+        line-height: 1.6;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- GESTION DE LA CLÉ API ---
-# On récupère la clé dans les secrets de Streamlit. 
-# Si elle n'existe pas, on met une chaîne vide.
+# 3. Gestion de la clé API (Automatique via Secrets)
 st_api_key = st.secrets.get("OPENAI_API_KEY", "")
 
-# --- BARRE LATÉRALE ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/602/602175.png", width=100)
     st.title("Configuration")
-    
-    # On utilise la clé des secrets comme valeur par défaut
-    api_key = st.text_input(
-        "Clé API OpenAI", 
-        value=st_api_key, 
-        type="password", 
-        help="La clé est chargée automatiquement depuis les Secrets."
-    )
-    
+    api_key = st.text_input("Clé API OpenAI", value=st_api_key, type="password")
     st.divider()
-    st.info("L'analyse démarre dès que vous séléctionnez un PDF et cliquez sur le bouton.")
+    st.info("Analyse intelligente de PV d'AG et diagnostics.")
 
-# --- CORPS PRINCIPAL ---
+# 4. Corps principal
 col1, col2 = st.columns([1, 2], gap="large")
 
 with col1:
-    st.subheader("📤 Document à analyser")
-    doc_type = st.selectbox(
-        "Quel type de document ?",
-        ["PV d'Assemblée Générale", "Dossier de Diagnostics (DPE)", "Rapport de gestion"]
-    )
-    uploaded_file = st.file_uploader("Glissez le PDF ici", type="pdf")
+    st.subheader("📤 Document")
+    doc_type = st.selectbox("Type de document", ["PV d'Assemblée Générale", "DPE", "Rapport de gestion"])
+    uploaded_file = st.file_uploader("Charger le PDF", type="pdf")
     analyze_btn = st.button("Lancer l'analyse magique ✨")
 
 with col2:
-    st.subheader("📋 Résultat de l'analyse")
+    st.subheader("📋 Rapport d'expertise")
     
     if analyze_btn:
-        # Diagnostic immédiat pour comprendre pourquoi ça ne se lance pas
         if not uploaded_file:
-            st.error("❌ Veuillez charger un fichier PDF dans la colonne de gauche.")
+            st.error("Veuillez charger un fichier PDF.")
         elif not api_key:
-            # On essaye de récupérer la clé des secrets si le champ texte est vide
-            api_key = st.secrets.get("OPENAI_API_KEY", "")
-            if not api_key:
-                st.error("❌ Clé API introuvable. Tapez-la dans la barre latérale.")
-        
-        # Si tout est OK, on lance l'analyse
-        if uploaded_file and api_key:
-            with st.spinner("Analyse approfondie en cours..."):
+            st.error("Clé API manquante.")
+        else:
+            with st.spinner("L'IA examine le document..."):
                 try:
-                    # Initialisation du client avec la clé trouvée
-                    client = OpenAI(api_key=api_key)
-                    
+                    # Lecture du PDF
                     reader = PyPDF2.PdfReader(uploaded_file)
                     text = "".join([page.extract_text() for page in reader.pages[:15]])
                     
-                    # Ton prompt et la suite du code...
-                    st.success("✅ Connexion réussie à l'IA !")
+                    # Appel OpenAI
+                    client = OpenAI(api_key=api_key)
                     
-                    # [METTRE ICI TON CODE DE REQUÊTE OPENAI ET D'AFFICHAGE]
+                    prompt = f"""Tu es un expert en immobilier. Analyse ce {doc_type}.
+                    Extraits d'abord ces 3 données :
+                    METRIC1: [Résumé de l'état général en 3 mots]
+                    METRIC2: [Total des travaux votés en €]
+                    METRIC3: [Risque: Faible, Modéré ou Critique]
+
+                    Fais ensuite un rapport structuré avec des titres et des puces :
+                    ### 🏗️ Travaux & Entretien
+                    (Détaille les travaux votés, montants et calendrier)
                     
+                    ### 💰 Situation Financière
+                    (Budget, impayés, fonds travaux)
+                    
+                    ### ⚠️ Points de Vigilance
+                    (Litiges, procédures, urgences)
+                    
+                    ### 📝 Conclusion de l'expert
+                    (Ton avis sur l'opportunité d'achat)
+                    
+                    Document : {text}"""
+
+                    response = client.chat.completions.create(
+                        model="gpt-4o",
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+                    
+                    full_res = response.choices[0].message.content
+                    
+                    # Découpage pour l'affichage
+                    lines = full_res.split('\n')
+                    m1_v = next((l.split(': ')[1] for l in lines if "METRIC1" in l), "N/A")
+                    m2_v = next((l.split(': ')[1] for l in lines if "METRIC2" in l), "0 €")
+                    m3_v = next((l.split(': ')[1] for l in lines if "METRIC3" in l), "Inconnu")
+                    
+                    clean_report = "\n".join([l for l in lines if "METRIC" not in l])
+
+                    # Affichage des résultats
+                    c_a, c_b, c_c = st.columns(3)
+                    c_a.metric("État", m1_v)
+                    c_b.metric("Travaux", m2_v)
+                    c_c.metric("Risque", m3_v)
+                    
+                    st.divider()
+                    st.markdown(f'<div class="report-box">{clean_report}</div>', unsafe_allow_html=True)
+                    st.success("Analyse terminée avec succès !")
+
                 except Exception as e:
-                    st.error(f"Erreur technique : {e}")
- 
+                    st.error(f"Erreur lors de l'analyse : {e}")
