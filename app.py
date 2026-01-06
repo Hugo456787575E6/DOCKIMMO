@@ -61,46 +61,75 @@ with col2:
         else:
             with st.spinner("L'IA examine le document..."):
                 try:
-                    try:
+                    # --- EXTRACTION DU TEXTE ---
                     reader = PyPDF2.PdfReader(uploaded_file)
                     pages_text = []
-                    for page in reader.pages[:20]: # On monte à 20 pages au cas où
+                    for page in reader.pages[:20]: # Analyse jusqu'à 20 pages
                         t = page.extract_text()
                         if t:
                             pages_text.append(t)
                     
                     text = "\n".join(pages_text)
 
+                    # Vérification si le PDF contient du texte
                     if len(text.strip()) < 50:
-                        st.error("❌ Le texte du PDF n'a pas pu être extrait. Est-ce un scan ?")
-                        st.info("Conseil : Essayez avec un PDF contenant du texte sélectionnable.")
+                        st.error("❌ Le texte du PDF n'a pas pu être extrait. Est-ce un scan (image) ?")
                         st.stop()
                     
+                    # --- APPEL OPENAI ---
                     client = OpenAI(api_key=api_key)
                     
-                    # On demande explicitement à l'IA d'analyser le texte fourni dessous
-                    prompt = f"""Tu es un expert en audit immobilier. 
-                    ANALYSE LE TEXTE DU DOCUMENT CI-DESSOUS ET EXTRAIS LES INFOS.
+                    prompt = f"""Tu es un expert en audit immobilier professionnel. 
+                    ANALYSE LE TEXTE CI-DESSOUS ({doc_type}) ET EXTRAIS LES INFOS.
                     
                     D'abord, donne obligatoirement ces 3 lignes :
-                    METRIC1: [Résumé état]
-                    METRIC2: [Total travaux en €]
+                    METRIC1: [Résumé état général]
+                    METRIC2: [Total travaux votés en €]
                     METRIC3: [Risque: Faible, Modéré ou Critique]
 
-                    Rapport détaillé ensuite :
-                    ### 🏗️ Travaux
-                    ### 💰 Finances
-                    ### ⚠️ Risques
-                    ### 📝 Synthèse
+                    Rapport détaillé ensuite (utilise des titres et des listes à puces) :
+                    ### 🏗️ Travaux et Entretien
+                    ### 💰 Situation Financière
+                    ### ⚠️ Points de Vigilance
+                    ### 📝 Synthèse de l'Expert
 
-                    TEXTE DU DOCUMENT À ANALYSER :
+                    TEXTE DU DOCUMENT :
                     {text}"""
 
                     response = client.chat.completions.create(
                         model="gpt-4o",
                         messages=[
-                            {"role": "system", "content": "Tu es un assistant qui analyse des documents immobiliers. Tu ne réponds qu'en te basant sur le texte fourni."},
+                            {"role": "system", "content": "Tu es un expert immobilier. Tu analyses le texte fourni et ne l'inventes pas."},
                             {"role": "user", "content": prompt}
                         ],
-                        temperature=0.2 # On baisse la température pour plus de précision
+                        temperature=0.2
                     )
+                    
+                    full_res = response.choices[0].message.content
+
+                    # --- NETTOYAGE ET AFFICHAGE ---
+                    lines = full_res.split('\n')
+                    m1_v = next((l.split(': ')[1] for l in lines if "METRIC1" in l), "N/A")
+                    m2_v = next((l.split(': ')[1] for l in lines if "METRIC2" in l), "0 €")
+                    m3_v = next((l.split(': ')[1] for l in lines if "METRIC3" in l), "Inconnu")
+                    
+                    clean_report = "\n".join([l for l in lines if "METRIC" not in l])
+
+                    # Affichage des Metrics
+                    c_a, c_b, c_c = st.columns(3)
+                    with c_a:
+                        st.info("**État**")
+                        st.subheader(m1_v)
+                    with c_b:
+                        st.success("**Travaux**")
+                        st.subheader(m2_v)
+                    with c_c:
+                        st.warning("**Risque**")
+                        st.subheader(m3_v)
+                    
+                    st.divider()
+                    st.markdown(clean_report)
+                    st.success("✅ Analyse terminée avec succès !")
+
+                except Exception as e:
+                    st.error(f"Erreur technique : {e}")
