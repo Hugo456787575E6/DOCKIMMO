@@ -73,14 +73,39 @@ with col2:
 
                     client = OpenAI(api_key=api_key)
                     
+                    # --- DÉFINITION DU PROMPT CHIRURGICAL ---
+                    instructions_chirurgicales = f"""Tu es un auditeur expert en copropriété française. 
+                    ANALYSE CE DOCUMENT ({doc_type}) AVEC UNE PRÉCISION ABSOLUE.
+
+                    1. IDENTIFICATION : Qui est le destinataire du document ? (Cherche le nom en haut ou dans la feuille de présence).
+                    2. TRAVAUX VOTÉS : Liste chaque résolution de travaux approuvée avec son montant total.
+                    3. CALCUL INDIVIDUEL : Si tu trouves les millièmes ou la quote-part du copropriétaire (ex: 125/1000è), calcule sa part estimée pour chaque montant de travaux trouvé.
+                    4. FINANCES : Note le solde créditeur ou débiteur si mentionné.
+
+                    D'abord, donne impérativement ces 3 lignes :
+                    METRIC1: [Nom du copropriétaire identifié]
+                    METRIC2: [Total Travaux Copro en €]
+                    METRIC3: [Risque: Faible, Modéré ou Critique]
+
+                    Rapport détaillé ensuite :
+                    ### 👤 Profil du Copropriétaire
+                    - **Nom :** - **Quote-part identifiée :** (ex: 450/10000è)
+
+                    ### 🏗️ Travaux et Budget (Détails)
+                    - Liste des résolutions et **VOTRE PART ESTIMÉE : [Calcul €]**
+
+                    ### 💰 État des Charges et Fonds
+                    (Dettes syndicat, fonds Alur, etc.)
+
+                    ### ⚠️ Points de Vigilance Spécifiques
+                    """
+
                     # --- LOGIQUE HYBRIDE (TEXTE OU VISION) ---
                     if len(extracted_text.strip()) < 200:
                         st.warning("🔍 Scan détecté. Analyse par images (Vision)...")
-                        
-                        # Conversion des 3 premières pages en images
                         images = convert_from_bytes(uploaded_file.getvalue(), last_page=3)
                         
-                        user_content = [{"type": "text", "text": f"Analyse ces images de ce document ({doc_type}). Extraits METRIC1: [Etat], METRIC2: [Total Travaux €], METRIC3: [Risque] puis ton rapport détaillé."}]
+                        user_content = [{"type": "text", "text": instructions_chirurgicales}]
                         
                         for img in images:
                             buffered = io.BytesIO()
@@ -99,7 +124,7 @@ with col2:
                         st.success("📄 Texte détecté. Analyse textuelle rapide...")
                         messages = [
                             {"role": "system", "content": "Tu es un expert immobilier professionnel."},
-                            {"role": "user", "content": f"Analyse ce texte ({doc_type}). Donne METRIC1: [Etat], METRIC2: [Total Travaux €], METRIC3: [Risque] puis ton rapport.\n\nTexte :\n{extracted_text}"}
+                            {"role": "user", "content": f"{instructions_chirurgicales}\n\nTEXTE DU DOCUMENT :\n{extracted_text}"}
                         ]
 
                     # --- APPEL À GPT-4o ---
@@ -113,7 +138,7 @@ with col2:
 
                     # --- NETTOYAGE ET AFFICHAGE ---
                     lines = full_res.split('\n')
-                    m1_v = next((l.split(': ')[1] for l in lines if "METRIC1" in l), "N/A")
+                    m1_v = next((l.split(': ')[1] for l in lines if "METRIC1" in l), "Non identifié")
                     m2_v = next((l.split(': ')[1] for l in lines if "METRIC2" in l), "0 €")
                     m3_v = next((l.split(': ')[1] for l in lines if "METRIC3" in l), "Inconnu")
                     
@@ -122,18 +147,18 @@ with col2:
                     # Affichage des Metrics
                     c_a, c_b, c_c = st.columns(3)
                     with c_a:
-                        st.info("**État**")
+                        st.info("**Copropriétaire**")
                         st.subheader(m1_v)
                     with c_b:
-                        st.success("**Travaux**")
+                        st.success("**Total Travaux**")
                         st.subheader(m2_v)
                     with c_c:
-                        st.warning("**Risque**")
+                        st.warning("**Niveau de Risque**")
                         st.subheader(m3_v)
                     
                     st.divider()
                     st.markdown(clean_report)
-                    st.success("✅ Analyse terminée avec succès !")
+                    st.success("✅ Analyse personnalisée terminée !")
 
                 except Exception as e:
                     st.error(f"Erreur technique : {e}")
