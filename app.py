@@ -1,6 +1,10 @@
 import streamlit as st
 from openai import OpenAI
 import PyPDF2
+import io
+import base64
+from pdf2image import convert_from_bytes
+from PIL import Image
 
 # 1. Configuration de la page
 st.set_page_config(
@@ -31,7 +35,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. Gestion de la clé API (Automatique via Secrets)
+# 3. Gestion de la clé API
 st_api_key = st.secrets.get("OPENAI_API_KEY", "")
 
 with st.sidebar:
@@ -39,7 +43,7 @@ with st.sidebar:
     st.title("Configuration")
     api_key = st.text_input("Clé API OpenAI", value=st_api_key, type="password")
     st.divider()
-    st.info("Analyse intelligente de PV d'AG et diagnostics.")
+    st.info("Mode Vision actif : l'IA analysera les images si le texte est absent.")
 
 # 4. Corps principal
 col1, col2 = st.columns([1, 2], gap="large")
@@ -59,50 +63,50 @@ with col2:
         elif not api_key:
             st.error("Clé API manquante.")
         else:
-            with st.spinner("L'IA examine le document..."):
+            with st.spinner("L'IA examine le document... (Le mode Vision peut prendre 30s)"):
                 try:
                     # --- EXTRACTION DU TEXTE ---
                     reader = PyPDF2.PdfReader(uploaded_file)
-                    pages_text = []
-                    for page in reader.pages[:20]: # Analyse jusqu'à 20 pages
-                        t = page.extract_text()
-                        if t:
-                            pages_text.append(t)
-                    
-                    text = "\n".join(pages_text)
+                    extracted_text = ""
+                    for page in reader.pages[:10]:
+                        extracted_text += page.extract_text() or ""
 
-                    # Vérification si le PDF contient du texte
-                    if len(text.strip()) < 50:
-                        st.error("❌ Le texte du PDF n'a pas pu être extrait. Est-ce un scan (image) ?")
-                        st.stop()
-                    
-                    # --- APPEL OPENAI ---
                     client = OpenAI(api_key=api_key)
                     
-                    prompt = f"""Tu es un expert en audit immobilier professionnel. 
-                    ANALYSE LE TEXTE CI-DESSOUS ({doc_type}) ET EXTRAIS LES INFOS.
-                    
-                    D'abord, donne obligatoirement ces 3 lignes :
-                    METRIC1: [Résumé état général]
-                    METRIC2: [Total travaux votés en €]
-                    METRIC3: [Risque: Faible, Modéré ou Critique]
+                    # --- LOGIQUE HYBRIDE (TEXTE OU VISION) ---
+                    if len(extracted_text.strip()) < 200:
+                        st.warning("🔍 Scan détecté. Analyse par images (Vision)...")
+                        
+                        # Conversion des 3 premières pages en images
+                        images = convert_from_bytes(uploaded_file.getvalue(), last_page=3)
+                        
+                        user_content = [{"type": "text", "text": f"Analyse ces images de ce document ({doc_type}). Extraits METRIC1: [Etat], METRIC2: [Total Travaux €], METRIC3: [Risque] puis ton rapport détaillé."}]
+                        
+                        for img in images:
+                            buffered = io.BytesIO()
+                            img.save(buffered, format="JPEG")
+                            img_b64 = base64.b64encode(buffered.getvalue()).decode()
+                            user_content.append({
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}
+                            })
+                        
+                        messages = [
+                            {"role": "system", "content": "Tu es un expert immobilier. Tu analyses visuellement les documents."},
+                            {"role": "user", "content": user_content}
+                        ]
+                    else:
+                        st.success("📄 Texte détecté. Analyse textuelle rapide...")
+                        messages = [
+                            {"role": "system", "content": "Tu es un expert immobilier professionnel."},
+                            {"role": "user", "content": f"Analyse ce texte ({doc_type}). Donne METRIC1: [Etat], METRIC2: [Total Travaux €], METRIC3: [Risque] puis ton rapport.\n\nTexte :\n{extracted_text}"}
+                        ]
 
-                    Rapport détaillé ensuite (utilise des titres et des listes à puces) :
-                    ### 🏗️ Travaux et Entretien
-                    ### 💰 Situation Financière
-                    ### ⚠️ Points de Vigilance
-                    ### 📝 Synthèse de l'Expert
-
-                    TEXTE DU DOCUMENT :
-                    {text}"""
-
+                    # --- APPEL À GPT-4o ---
                     response = client.chat.completions.create(
                         model="gpt-4o",
-                        messages=[
-                            {"role": "system", "content": "Tu es un expert immobilier. Tu analyses le texte fourni et ne l'inventes pas."},
-                            {"role": "user", "content": prompt}
-                        ],
-                        temperature=0.2
+                        messages=messages,
+                        temperature=0
                     )
                     
                     full_res = response.choices[0].message.content
