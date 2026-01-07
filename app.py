@@ -5,6 +5,7 @@ import io
 import base64
 from pdf2image import convert_from_bytes
 from PIL import Image
+from fpdf import FPDF
 
 # 1. Configuration de la page
 st.set_page_config(
@@ -12,6 +13,24 @@ st.set_page_config(
     page_icon="🏠",
     layout="wide"
 )
+
+# --- FONCTION DE GÉNÉRATION PDF ---
+def generate_pdf(name, content):
+    pdf = FPDF()
+    pdf.add_page()
+    
+    # Titre
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(200, 10, txt="RAPPORT D'EXPERTISE IMMOBILIERE", ln=True, align='C')
+    pdf.ln(10)
+    
+    # Corps du texte
+    pdf.set_font("Arial", size=11)
+    # Nettoyage des caractères spéciaux pour éviter les erreurs d'encodage
+    clean_text = content.encode('latin-1', 'replace').decode('latin-1')
+    pdf.multi_cell(0, 8, txt=clean_text)
+    
+    return pdf.output(dest='S').encode('latin-1')
 
 # 2. Style CSS
 st.markdown("""
@@ -89,14 +108,8 @@ with col2:
 
                     Rapport détaillé ensuite :
                     ### 👤 Profil du Copropriétaire
-                    - **Nom :** - **Quote-part identifiée :** (ex: 450/10000è)
-
                     ### 🏗️ Travaux et Budget (Détails)
-                    - Liste des résolutions et **VOTRE PART ESTIMÉE : [Calcul €]**
-
                     ### 💰 État des Charges et Fonds
-                    (Dettes syndicat, fonds Alur, etc.)
-
                     ### ⚠️ Points de Vigilance Spécifiques
                     """
 
@@ -104,9 +117,7 @@ with col2:
                     if len(extracted_text.strip()) < 200:
                         st.warning("🔍 Scan détecté. Analyse par images (Vision)...")
                         images = convert_from_bytes(uploaded_file.getvalue(), last_page=3)
-                        
                         user_content = [{"type": "text", "text": instructions_chirurgicales}]
-                        
                         for img in images:
                             buffered = io.BytesIO()
                             img.save(buffered, format="JPEG")
@@ -115,25 +126,16 @@ with col2:
                                 "type": "image_url",
                                 "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}
                             })
-                        
-                        messages = [
-                            {"role": "system", "content": "Tu es un expert immobilier. Tu analyses visuellement les documents."},
-                            {"role": "user", "content": user_content}
-                        ]
+                        messages = [{"role": "system", "content": "Expert immo."}, {"role": "user", "content": user_content}]
                     else:
                         st.success("📄 Texte détecté. Analyse textuelle rapide...")
                         messages = [
-                            {"role": "system", "content": "Tu es un expert immobilier professionnel."},
-                            {"role": "user", "content": f"{instructions_chirurgicales}\n\nTEXTE DU DOCUMENT :\n{extracted_text}"}
+                            {"role": "system", "content": "Expert immo."},
+                            {"role": "user", "content": f"{instructions_chirurgicales}\n\nTEXTE :\n{extracted_text}"}
                         ]
 
                     # --- APPEL À GPT-4o ---
-                    response = client.chat.completions.create(
-                        model="gpt-4o",
-                        messages=messages,
-                        temperature=0
-                    )
-                    
+                    response = client.chat.completions.create(model="gpt-4o", messages=messages, temperature=0)
                     full_res = response.choices[0].message.content
 
                     # --- NETTOYAGE ET AFFICHAGE ---
@@ -158,6 +160,16 @@ with col2:
                     
                     st.divider()
                     st.markdown(clean_report)
+                    
+                    # --- BOUTON PDF ---
+                    pdf_bytes = generate_pdf(m1_v, clean_report)
+                    st.download_button(
+                        label="📥 Télécharger le rapport en PDF",
+                        data=pdf_bytes,
+                        file_name=f"Rapport_DOCKIMMO_{m1_v.replace(' ', '_')}.pdf",
+                        mime="application/pdf"
+                    )
+                    
                     st.success("✅ Analyse personnalisée terminée !")
 
                 except Exception as e:
