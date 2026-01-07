@@ -7,7 +7,7 @@ from pdf2image import convert_from_bytes
 from PIL import Image
 from fpdf import FPDF
 
-# 1. Configuration de la page
+# 1. Configuration de la page (DOIT être la première commande Streamlit)
 st.set_page_config(
     page_title="DOCKIMMO | Expert IA",
     page_icon="🏠",
@@ -19,54 +19,46 @@ def generate_pdf(name, content):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", "B", 16)
-    pdf.cell(200, 10, txt="RAPPORT D'EXPERTISE IMMOBILIERE - DOCKIMMO", ln=True, align='C')
+    pdf.cell(200, 10, txt="RAPPORT D'EXPERTISE DOCKIMMO", ln=True, align='C')
     pdf.ln(10)
     pdf.set_font("Arial", size=11)
-    # Nettoyage pour compatibilité PDF
     clean_text = content.encode('latin-1', 'replace').decode('latin-1')
     pdf.multi_cell(0, 8, txt=clean_text)
     return pdf.output(dest='S').encode('latin-1')
 
-# 2. Style CSS (Design Premium & Épuré)
+# 2. Style CSS (C'est ce bloc qui change l'apparence)
 st.markdown("""
     <style>
+    /* Change le fond en gris clair */
     .stApp { background-color: #f8f9fa; }
     
-    /* Style des titres */
-    h1, h2, h3 { color: #1e3a8a; font-family: 'Helvetica Neue', sans-serif; }
+    /* Style des titres en bleu DockImmo */
+    h1, h2, h3 { color: #1e3a8a !important; font-family: 'Helvetica Neue', sans-serif; }
     
-    /* Cards Blanches */
-    [data-testid="stVerticalBlock"] > div:has(div.stButton) {
-        background-color: white;
-        padding: 2rem;
-        border-radius: 15px;
-        border: 1px solid #e5e7eb;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-    }
-    
-    /* Style du bouton principal */
+    /* Bouton d'analyse en dégradé bleu */
     .stButton>button {
-        background: linear-gradient(90deg, #007BFF 0%, #0056b3 100%);
-        color: white;
-        border: none;
-        font-weight: bold;
-        height: 3.5em;
-        transition: all 0.3s ease;
-    }
-    .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0,123,255,0.3);
+        background: linear-gradient(90deg, #007BFF 0%, #0056b3 100%) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 8px !important;
+        height: 3.5em !important;
+        font-weight: bold !important;
     }
     
-    /* Metrics Box */
-    [data-testid="stMetricValue"] { font-size: 1.8rem; color: #1e3a8a; }
+    /* Style des encadrés de texte (Rapport) */
+    .report-container {
+        background-color: white;
+        padding: 20px;
+        border-radius: 10px;
+        border: 1px solid #e5e7eb;
+    }
     </style>
     """, unsafe_allow_html=True)
 
 # 3. Header Épuré (Logo + Titre)
 col_logo, col_title = st.columns([1, 5])
 with col_logo:
-    # On affiche uniquement l'icône du logo
+    # Icône seule (sans texte anglais)
     st.image("https://cdn-icons-png.flaticon.com/512/602/602175.png", width=80)
 with col_title:
     st.markdown("<h1 style='margin-bottom:0;'>DOCKIMMO</h1>", unsafe_allow_html=True)
@@ -74,103 +66,76 @@ with col_title:
 
 st.divider()
 
-# 4. Sidebar et Paramètres
+# 4. Sidebar pour la clé API
 st_api_key = st.secrets.get("OPENAI_API_KEY", "")
 with st.sidebar:
-    st.markdown("### ⚙️ Configuration")
+    st.markdown("### ⚙️ Paramètres")
     api_key = st.text_input("Clé API OpenAI", value=st_api_key, type="password")
-    st.divider()
-    st.info("L'IA utilise GPT-4o pour analyser les textes et les images scannées.")
+    st.info("Le mode Vision est actif pour les scans.")
 
-# 5. Corps principal
+# 5. Interface Principale
 col_input, col_report = st.columns([1, 2], gap="large")
 
 with col_input:
-    st.subheader("📤 Document à analyser")
+    st.subheader("📤 Document")
     doc_type = st.selectbox("Type de document", ["PV d'Assemblée Générale", "DPE", "Rapport de gestion"])
-    uploaded_file = st.file_uploader("Glissez votre PDF ici", type="pdf")
-    analyze_btn = st.button("Lancer l'audit intelligent ✨")
+    uploaded_file = st.file_uploader("Déposez votre PDF", type="pdf")
+    analyze_btn = st.button("Lancer l'audit ✨")
 
 with col_report:
     st.subheader("📋 Rapport d'expertise")
     
-    if analyze_btn:
-        if not uploaded_file:
-            st.error("Veuillez charger un fichier PDF.")
-        elif not api_key:
-            st.error("Clé API manquante.")
-        else:
-            with st.spinner("Analyse chirurgicale en cours... (Mode Vision actif)"):
-                try:
-                    # --- EXTRACTION TEXTE ---
-                    reader = PyPDF2.PdfReader(uploaded_file)
-                    extracted_text = "".join([p.extract_text() or "" for p in reader.pages[:10]])
+    if analyze_btn and uploaded_file and api_key:
+        with st.spinner("Analyse en cours..."):
+            try:
+                # --- EXTRACTION ---
+                reader = PyPDF2.PdfReader(uploaded_file)
+                text = "".join([p.extract_text() or "" for p in reader.pages[:5]])
+                client = OpenAI(api_key=api_key)
+                
+                prompt = f"Expert immo. Analyse {doc_type}. Donne METRIC1: [Nom], METRIC2: [Total Travaux €], METRIC3: [Risque]. Puis un rapport détaillé."
 
-                    client = OpenAI(api_key=api_key)
-                    
-                    instructions = f"""Tu es un auditeur expert en copropriété française. 
-                    ANALYSE CE DOCUMENT ({doc_type}) AVEC UNE PRÉCISION ABSOLUE.
+                if len(text.strip()) < 200:
+                    images = convert_from_bytes(uploaded_file.getvalue(), last_page=2)
+                    content = [{"type": "text", "text": prompt}]
+                    for img in images:
+                        buf = io.BytesIO()
+                        img.save(buf, format="JPEG")
+                        img_b64 = base64.b64encode(buf.getvalue()).decode()
+                        content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}})
+                    messages = [{"role": "user", "content": content}]
+                else:
+                    messages = [{"role": "user", "content": f"{prompt}\n\nTexte:\n{text}"}]
 
-                    1. IDENTIFICATION : Nom du destinataire/copropriétaire.
-                    2. TRAVAUX VOTÉS : Liste des résolutions approuvées et montants.
-                    3. CALCUL INDIVIDUEL : Part du copropriétaire selon ses millièmes.
-                    4. FINANCES : État du fonds Alur et dettes éventuelles.
+                response = client.chat.completions.create(model="gpt-4o", messages=messages, temperature=0)
+                full_res = response.choices[0].message.content
 
-                    D'abord, donne impérativement ces 3 lignes :
-                    METRIC1: [Nom du copropriétaire]
-                    METRIC2: [Total Travaux Copro €]
-                    METRIC3: [Risque: Faible, Modéré ou Critique]
+                # --- AFFICHAGE ---
+                lines = full_res.split('\n')
+                m1 = next((l.split(': ')[1] for l in lines if "METRIC1" in l), "Inconnu")
+                m2 = next((l.split(': ')[1] for l in lines if "METRIC2" in l), "0 €")
+                m3 = next((l.split(': ')[1] for l in lines if "METRIC3" in l), "N/A")
 
-                    Rapport détaillé ensuite avec titres clairs."""
+                # Metrics
+                st.markdown("---")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("👤 Propriétaire", m1)
+                c2.metric("🏗️ Travaux", m2)
+                c3.metric("⚠️ Risque", m3)
+                st.markdown("---")
 
-                    # --- LOGIQUE VISION OU TEXTE ---
-                    if len(extracted_text.strip()) < 200:
-                        st.warning("🔍 Scan détecté. Analyse par images (Vision)...")
-                        images = convert_from_bytes(uploaded_file.getvalue(), last_page=3)
-                        user_content = [{"type": "text", "text": instructions}]
-                        for img in images:
-                            buffered = io.BytesIO()
-                            img.save(buffered, format="JPEG")
-                            img_b64 = base64.b64encode(buffered.getvalue()).decode()
-                            user_content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}})
-                        messages = [{"role": "user", "content": user_content}]
-                    else:
-                        st.success("📄 Texte détecté. Analyse textuelle rapide...")
-                        messages = [{"role": "user", "content": f"{instructions}\n\nTEXTE:\n{extracted_text}"}]
+                # Rapport
+                report_body = full_res.split('---')[-1]
+                st.markdown(f'<div class="report-container">{report_body}</div>', unsafe_allow_html=True)
+                
+                # Bouton PDF
+                pdf_data = generate_pdf(m1, report_body)
+                st.download_button(
+                    label="📥 Télécharger le PDF",
+                    data=pdf_data,
+                    file_name=f"Expertise_{m1}.pdf",
+                    mime="application/pdf"
+                )
 
-                    # --- APPEL IA ---
-                    response = client.chat.completions.create(model="gpt-4o", messages=messages, temperature=0)
-                    full_res = response.choices[0].message.content
-
-                    # --- EXTRACTION DES DONNÉES CLÉS ---
-                    lines = full_res.split('\n')
-                    m1_v = next((l.split(': ')[1] for l in lines if "METRIC1" in l), "Non identifié")
-                    m2_v = next((l.split(': ')[1] for l in lines if "METRIC2" in l), "0 €")
-                    m3_v = next((l.split(': ')[1] for l in lines if "METRIC3" in l), "Inconnu")
-                    
-                    clean_report = "\n".join([l for l in lines if "METRIC" not in l])
-
-                    # Affichage des Metrics Stylisées
-                    st.markdown("---")
-                    m_col1, m_col2, m_col3 = st.columns(3)
-                    m_col1.metric("👤 Propriétaire", m1_v)
-                    m_col2.metric("🏗️ Budget Travaux", m2_v)
-                    m_col3.metric("⚠️ Niveau Risque", m3_v)
-                    st.markdown("---")
-
-                    # Affichage du Rapport
-                    st.markdown(clean_report)
-                    
-                    # --- BOUTON DE TÉLÉCHARGEMENT PDF ---
-                    pdf_bytes = generate_pdf(m1_v, clean_report)
-                    st.download_button(
-                        label="📥 Télécharger le rapport expert (PDF)",
-                        data=pdf_bytes,
-                        file_name=f"Expertise_DOCKIMMO_{m1_v.replace(' ', '_')}.pdf",
-                        mime="application/pdf"
-                    )
-                    
-                    st.success("✅ Analyse terminée avec succès !")
-
-                except Exception as e:
-                    st.error(f"Erreur technique : {e}")
+            except Exception as e:
+                st.error(f"Erreur : {e}")
